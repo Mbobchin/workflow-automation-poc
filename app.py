@@ -43,85 +43,63 @@ ROUTING_MAP = {
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Health check endpoint"""
     return jsonify({"status": "healthy"}), 200
 
 
 @app.route("/webhook/ticket", methods=["POST"])
 def handle_ticket():
-    """
-    Webhook endpoint to receive support tickets
-    
-    Expected JSON:
-    {
-        "email": "customer@example.com",
-        "subject": "Cannot login",
-        "description": "I'"'"'ve been locked out of my account..."
-    }
-    """
     try:
-        # Validate request JSON
         try:
             payload = request.get_json()
             if not payload:
                 return jsonify({"error": "Empty request body"}), 400
         except Exception as e:
-            logger.error(f"Failed to parse JSON: {e}")
+            logger.error("Failed to parse JSON: " + str(e))
             return jsonify({"error": "Invalid JSON"}), 400
 
-        # Parse and validate ticket data
         try:
             ticket = TicketRequest(**payload)
         except ValidationError as e:
-            logger.error(f"Validation error: {e}")
-            return jsonify({"error": "Invalid ticket data", "details": e.errors()}), 422
+            logger.error("Validation error: " + str(e))
+            return jsonify({"error": "Invalid ticket data", "details": str(e.errors())}), 422
 
-        logger.info(f"Received ticket from {ticket.email}: {ticket.subject}")
+        logger.info("Received ticket from " + ticket.email + ": " + ticket.subject)
 
-        # Step 1: Classify the ticket using Claude
         try:
             classification = classify_ticket(ticket)
-            logger.info(
-                f"Classified ticket: urgency={classification.urgency}, "
-                f"category={classification.category}"
-            )
+            logger.info("Classified: urgency=" + classification.urgency + ", category=" + classification.category)
         except Exception as e:
-            logger.error(f"Classification failed: {e}")
+            logger.error("Classification failed: " + str(e))
             return jsonify({"error": "Failed to classify ticket"}), 500
 
-        # Step 2: Determine routing
         slack_channel = ROUTING_MAP.get(
             (classification.urgency, classification.category), "#support"
         )
-        logger.info(f"Routing to {slack_channel}")
+        logger.info("Routing to " + slack_channel)
 
-        # Step 3: Post to Slack
         try:
             slack_message = format_slack_message(ticket, classification, slack_channel)
             post_to_slack(slack_channel, slack_message)
-            logger.info(f"Posted to Slack channel {slack_channel}")
+            logger.info("Posted to Slack: " + slack_channel)
         except Exception as e:
-            logger.error(f"Slack posting failed: {e}")
+            logger.error("Slack posting failed: " + str(e))
             pass
 
-        # Step 4: Send email summary
         try:
-            email_subject = f"[{classification.urgency.upper()}] {ticket.subject}"
+            email_subject = "[" + classification.urgency.upper() + "] " + ticket.subject
             email_body = format_email_body(ticket, classification, slack_channel)
             send_summary_email(
                 recipient=app.config["ADMIN_EMAIL"],
                 subject=email_subject,
                 body=email_body,
             )
-            logger.info(f"Sent email summary to {app.config['"'"'ADMIN_EMAIL'"'"']}")
+            logger.info("Email sent to " + app.config["ADMIN_EMAIL"])
         except Exception as e:
-            logger.error(f"Email sending failed: {e}")
+            logger.error("Email sending failed: " + str(e))
             pass
 
-        # Step 5: Log ticket for audit trail
         log_ticket(ticket, classification, slack_channel)
 
-        # Return success
         return (
             jsonify(
                 {
@@ -138,20 +116,23 @@ def handle_ticket():
         )
 
     except Exception as e:
-        logger.exception(f"Unhandled error in ticket processing: {e}")
+        logger.exception("Unhandled error: " + str(e))
         return jsonify({"error": "Internal server error"}), 500
 
 
 def format_slack_message(
     ticket: TicketRequest, classification: Classification, channel: str
 ) -> Dict[str, Any]:
-    """Format ticket as a Slack message"""
     urgency_emoji = {
         "urgent": "??",
         "normal": "??",
         "low": "??",
     }
     emoji = urgency_emoji.get(classification.urgency, "?")
+    
+    desc_preview = ticket.description[:500]
+    if len(ticket.description) > 500:
+        desc_preview = desc_preview + "..."
 
     return {
         "blocks": [
@@ -159,7 +140,7 @@ def format_slack_message(
                 "type": "header",
                 "text": {
                     "type": "plain_text",
-                    "text": f"{emoji} {classification.urgency.upper()} - {ticket.subject}",
+                    "text": emoji + " " + classification.urgency.upper() + " - " + ticket.subject,
                 },
             },
             {
@@ -167,11 +148,11 @@ def format_slack_message(
                 "fields": [
                     {
                         "type": "mrkdwn",
-                        "text": f"*From:*\n{ticket.email}",
+                        "text": "*From:*\n" + ticket.email,
                     },
                     {
                         "type": "mrkdwn",
-                        "text": f"*Category:*\n{classification.category}",
+                        "text": "*Category:*\n" + classification.category,
                     },
                 ],
             },
@@ -179,14 +160,14 @@ def format_slack_message(
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"*Description:*\n{ticket.description[:500]}{'"'"'...'"'"' if len(ticket.description) > 500 else '"'"''"'"'}",
+                    "text": "*Description:*\n" + desc_preview,
                 },
             },
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"*Summary:*\n{classification.summary}",
+                    "text": "*Summary:*\n" + classification.summary,
                 },
             },
             {
@@ -197,7 +178,7 @@ def format_slack_message(
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": f"_Received at {datetime.utcnow().isoformat()}Z_",
+                        "text": "_Received at " + datetime.utcnow().isoformat() + "Z_",
                     }
                 ],
             },
@@ -208,27 +189,26 @@ def format_slack_message(
 def format_email_body(
     ticket: TicketRequest, classification: Classification, channel: str
 ) -> str:
-    """Format ticket as an email body"""
-    return f"""
+    return """
 New Support Ticket Received
 
-From: {ticket.email}
-Subject: {ticket.subject}
-Received: {datetime.utcnow().isoformat()}Z
+From: """ + ticket.email + """
+Subject: """ + ticket.subject + """
+Received: """ + datetime.utcnow().isoformat() + """Z
 
 CLASSIFICATION
 ==============
-Urgency: {classification.urgency.upper()}
-Category: {classification.category}
-Routed To: {channel}
+Urgency: """ + classification.urgency.upper() + """
+Category: """ + classification.category + """
+Routed To: """ + channel + """
 
 DESCRIPTION
 ===========
-{ticket.description}
+""" + ticket.description + """
 
 CLAUDE ANALYSIS
 ===============
-{classification.summary}
+""" + classification.summary + """
 
 ---
 This is an automated message from the Workflow Automation POC.
@@ -236,16 +216,13 @@ This is an automated message from the Workflow Automation POC.
 
 
 def generate_ticket_id() -> str:
-    """Generate a simple ticket ID based on timestamp"""
     import time
-
-    return f"TKT-{int(time.time())}"
+    return "TKT-" + str(int(time.time()))
 
 
 def log_ticket(
     ticket: TicketRequest, classification: Classification, channel: str
 ) -> None:
-    """Log ticket to audit trail (simple file-based for POC)"""
     import os
 
     logs_dir = "logs"
@@ -273,7 +250,7 @@ def not_found(error):
 
 @app.errorhandler(500)
 def internal_error(error):
-    logger.error(f"Internal server error: {error}")
+    logger.error("Internal server error: " + str(error))
     return jsonify({"error": "Internal server error"}), 500
 
 
