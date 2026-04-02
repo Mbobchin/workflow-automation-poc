@@ -21,13 +21,13 @@ class TicketRequest(BaseModel):
             "example": {
                 "email": "customer@example.com",
                 "subject": "Cannot login to my account",
-                "description": "I'"'"'ve been locked out of my account for the past 2 hours. I'"'"'ve tried resetting my password but haven'"'"'t received the reset email.",
+                "description": "I have been locked out of my account for 2 hours and need help",
             }
         }
 
 
 class Classification(BaseModel):
-    """Claude'"'"'s classification of a ticket"""
+    """Claude classification of a ticket"""
 
     urgency: Literal["urgent", "normal", "low"] = Field(
         description="Priority level of the ticket"
@@ -44,6 +44,6 @@ class Classification(BaseModel):
             "example": {
                 "urgency": "urgent",
                 "category": "technical",
-                "summary": "Customer is locked out of their account. Likely a forgotten password issue. Recommend: 1) Verify account exists, 2) Manually reset password, 3) Send reset instructions via SMS as backup.",
+                "summary": "Customer is locked out. Recommend immediate password reset.",
             }
         }
