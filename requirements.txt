@@ -4,4 +4,3 @@ email-validator
 python-dotenv
 anthropic
 slack-sdk
-gunicorn
